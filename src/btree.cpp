@@ -220,62 +220,96 @@ int BTreeIndex::compareIndexKey(const void *one, const void *two, bool string1){
 // BTreeIndex::startScan
 // -----------------------------------------------------------------------------
 
+//scan through leaf nodes until meets upper bound.
+
 const void BTreeIndex::startScan(const void* lowValParm,
 		const Operator lowOpParm,
 		const void* highValParm,
 		const Operator highOpParm)
 {
+	// not sure if lowOp and highOp will have values at this point....
 	if(lowOpParm != lowOp || highOpParm != highOp){
 		throw BadOpcodesException();
 	}
-	if(compareIndexKey(lowValParm, highValParm, false) < 0){
-		throw BadScanrangeException();
+
+	if(attributeType == INTEGER){
+		lowValInt = *((int *)lowValParm);
+		highValInt = *((int *)highValParm);
+		if(lowValInt < highValInt){
+			throw BadScanrangeException();
+		}
 	}
+	else if(attributeType == DOUBLE){
+		lowValDouble = *((double *)lowValParm);
+		highValDouble = *((double *)highValParm);
+		if(lowValDouble < highValDouble){
+			throw BadScanrangeException();
+		}
+	}
+	else if(attributeType == STRING){
+		lowValString = std::string((char *)lowValParm);
+		highValString = std::string((char *)highValParm);
+		if(lowValDouble < highValDouble){
+			throw BadScanrangeException();
+		}
+	}
+
 	// checks if index scan has already started. Ends it if it has.
 	if(scanExecuting){
 		endScan();
 	}
+
 	scanExecuting = true;
 	lowOp = lowOpParm;
+	highOp = highOpParm;
 	// if there are no nodes in the B+ tree
 	if(rootPageNum == Page::INVALID_NUMBER){
 		exit(1);
 	}
-	// if there is one node in the B+ tree (the root)
+	// leaf node
 	else if(rootPageNum == 2){
 		currentPageNum = rootPageNum;
 		bufMgr->readPage(file, currentPageNum, currentPageData);
-		if(attributeType == 0){ //INT
+
+		if(attributeType == INTEGER){ //INT
 			lowValInt = *((int *)lowValParm);
 			highValInt = *((int *)highValParm); 
 			LeafNodeInt *currentNode = (LeafNodeInt *)currentPageData;
-			int i;
-			for(i = 0; compareIndexKey(currentNode->keyArray + i, lowValParm, false) > 0 && i < leafOccupancy; i++);
-			if(lowOp == GT && compareIndexKey(currentNode->keyArray + i, lowValParm, false) == 0){
+			int i = 0;
+			while((currentNode->keyArray + i < lowValParm) || (currentNode->keyArray + i > highValParm)) {
+				i++;
+			}
+			if((lowOp == GT && currentNode->keyArray + i == lowValParm) || ( highOp == LT && currentNode->keyArray + i == highValParm)) {
 				throw NoSuchKeyFoundException();
 			}
 			nextEntry = i;
 			bufMgr->unPinPage(file, currentPageNum, false);
 		}
-		else if(attributeType == 1){ //DOUBLE
+		else if(attributeType == DOUBLE){ //DOUBLE
 			lowValDouble = *((double *)lowValParm);
 			highValDouble = *((double *)highValParm); 
 			LeafNodeDouble *currentNode = (LeafNodeDouble *)currentPageData;
-			int i;
-			for(i = 0; compareIndexKey(currentNode->keyArray + i, lowValParm, false) > 0 && i < leafOccupancy; i++);
-			if(lowOp == GT && compareIndexKey(currentNode->keyArray + i, lowValParm, false) == 0){
+			int i = 0;
+			while((currentNode->keyArray + i < lowValParm) || (currentNode->keyArray + i > highValParm)) {
+				i++;
+			}
+			if((lowOp == GT && currentNode->keyArray + i == lowValParm) 
+				|| ( highOp == LT && currentNode->keyArray + i == highValParm)) {
 				throw NoSuchKeyFoundException();
 			}
 			nextEntry = i;
 			bufMgr->unPinPage(file, currentPageNum, false);
 		}
-		else if(attributeType == 2){ //STRING
+		else if(attributeType == STRING){ //STRING
 			lowValString = std::string((char *)lowValParm).substr(0,STRINGSIZE);
 			highValString = std::string((char *)highValParm).substr(0,STRINGSIZE); 
 			LeafNodeString *currentNode = (LeafNodeString *)currentPageData;
-			int i;
-			for(i = 0; compareIndexKey(currentNode->keyArray + i, lowValParm, false) > 0 && i < leafOccupancy; i++);
-			if(lowOp == GT && compareIndexKey(currentNode->keyArray + i, lowValParm, false) == 0){
+			int i = 0;
+			while((currentNode->keyArray + i < lowValParm) || (currentNode->keyArray + i > highValParm)){
+				i++;
+			}
+			if((lowOp == GT && currentNode->keyArray + i == lowValParm) 
+				|| ( highOp == LT && currentNode->keyArray + i == highValParm)) {
 				throw NoSuchKeyFoundException();
 			}
 			nextEntry = i;
@@ -283,13 +317,15 @@ const void BTreeIndex::startScan(const void* lowValParm,
 		}
 
 	}
-	// there is more than one node in the B+ tree
+
+	//*******************************************************************************************************************
+	// non-leaf node
 	else{
 		currentPageNum = rootPageNum;
 		bool cont = true;
 		while(cont){
 			bufMgr->readPage(file, currentPageNum, currentPageData);
-			if(attributeType == 0){ // int
+			if(attributeType == INTEGER){ // int
 				NonLeafNodeInt *currentNode = (NonLeafNodeInt *)currentPageData;
 				int i = 0;
 				for(i = 0; currentNode->pageNoArray[i+1] != Page::INVALID_NUMBER && i < nodeOccupancy && compareIndexKey(currentNode->keyArray + i, lowValParm, false) > 0; i++);
@@ -315,7 +351,7 @@ const void BTreeIndex::startScan(const void* lowValParm,
 				bufMgr->unPinPage(file, currentPageNum, false);
 
 			}
-			else if(attributeType == 1){ // double
+			else if(attributeType == DOUBLE){ // double
 				NonLeafNodeDouble *currentNode = (NonLeafNodeDouble *)currentPageData;
 				int i = 0;
 				for(i = 0; currentNode->pageNoArray[i+1] != Page::INVALID_NUMBER && i < nodeOccupancy && compareIndexKey(currentNode->keyArray + i, lowValParm, false) > 0; i++);
@@ -340,7 +376,7 @@ const void BTreeIndex::startScan(const void* lowValParm,
 				nextEntry = j;
 				bufMgr->unPinPage(file, currentPageNum, false);
 			}
-			else if(attributeType == 2){ // string
+			else if(attributeType == STRING){ // string
 				NonLeafNodeString *currentNode = (NonLeafNodeString *)currentPageData;
 				int i = 0;
 				for(i = 0; currentNode->pageNoArray[i+1] != Page::INVALID_NUMBER && i < nodeOccupancy && compareIndexKey(currentNode->keyArray + i, lowValParm, false) > 0; i++);
@@ -486,22 +522,14 @@ const void BTreeIndex::endScan()
 {
 	if(scanExecuting == false){
 		// Unpin the current page:
-		try{
-			while(currentPageNum != Page::INVALID_NUMBER){
-				bufMgr->unPinPage(file, currentPageNum, false);
-			}
-		} catch(BadgerDbException e){
-				// do nothing (?)
-		}
+		if(currentPageNum != Page::INVALID_NUMBER){
+			bufMgr->unPinPage(file, currentPageNum, false);
+		}	
 		throw ScanNotInitializedException();
 	}
 	scanExecuting = false;
-		try{
-			while(currentPageNum != Page::INVALID_NUMBER){
+		if(currentPageNum != Page::INVALID_NUMBER){
 				bufMgr->unPinPage(file, currentPageNum, false);
-			}
-		} catch(BadgerDbException e){
-				// do nothing (?)
 		}
 
 }
