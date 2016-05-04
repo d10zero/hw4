@@ -110,6 +110,10 @@ BTreeIndex::~BTreeIndex()
 
 const void BTreeIndex::insertEntry(const void *key, const RecordId rid) 
 {
+	if(scanExecuting){
+		endScan();
+	}
+
 	if( attributeType == INTEGER)
 	{
 		insertInteger(&key, rid);
@@ -159,63 +163,6 @@ const void BTreeIndex::insertString(const void *key, const RecordId rid)
 
 }
 
-
-//------------------------------------------------------------------------------
-// BTreeIndex::compareIndexKey
-//--------------------------------------------------------------------------------
-
-
-// in process of getting rid of this method - will not need it once RIDKeyPair is
-// included in all of the scan methods
-
-int BTreeIndex::compareIndexKey(const void *one, const void *two, bool string1){
-	if(attributeType == INTEGER){
-		int key1 = *((int *)one);
-		int key2 = *((int *)two);
-		if(key1 < key2){
-			return 1;
-		}
-		else if(key2 < key1){
-			return -1;
-		}
-		else{
-			return 0;
-		}
-	}
-	else if(attributeType == DOUBLE){
-		double key1 = *((double *)one);
-		double key2 = *((double *)two);
-		if (key1 < key2){
-			return 1;
-		}
-		else if (key1 > key2){
-			return true;
-		}
-		else{
-			return 0;
-		}
-	}
-	else if(attributeType == STRING){
-		std::string key2;
-		if(string1){
-			key2 = *((std::string *)two);
-		}
-		else{
-			key2 = std::string((char *)two).substr(0, STRINGSIZE);
-		}
-		std::string key1 = std::string((char *)one).substr(0, STRINGSIZE);
-		if(key1 < key2){
-			return 1;
-		}
-		else if(key1 > key2){
-			return -1;
-		}
-		else{
-			return 0;
-		}
-	}
-}
-
 // -----------------------------------------------------------------------------
 // BTreeIndex::startScan
 // -----------------------------------------------------------------------------
@@ -231,27 +178,8 @@ const void BTreeIndex::startScan(const void* lowValParm,
 	if(lowOpParm != lowOp || highOpParm != highOp){
 		throw BadOpcodesException();
 	}
-
-	if(attributeType == INTEGER){
-		lowValInt = *((int *)lowValParm);
-		highValInt = *((int *)highValParm);
-		if(lowValInt < highValInt){
-			throw BadScanrangeException();
-		}
-	}
-	else if(attributeType == DOUBLE){
-		lowValDouble = *((double *)lowValParm);
-		highValDouble = *((double *)highValParm);
-		if(lowValDouble < highValDouble){
-			throw BadScanrangeException();
-		}
-	}
-	else if(attributeType == STRING){
-		lowValString = std::string((char *)lowValParm);
-		highValString = std::string((char *)highValParm);
-		if(lowValDouble < highValDouble){
-			throw BadScanrangeException();
-		}
+	if(lowValParm < highValParm){
+		throw BadScanrangeException();
 	}
 
 	// checks if index scan has already started. Ends it if it has.
@@ -260,153 +188,132 @@ const void BTreeIndex::startScan(const void* lowValParm,
 	}
 
 	scanExecuting = true;
+
 	lowOp = lowOpParm;
 	highOp = highOpParm;
 	// if there are no nodes in the B+ tree
 	if(rootPageNum == Page::INVALID_NUMBER){
 		exit(1);
 	}
-	// leaf node
-	else if(rootPageNum == 2){
-		currentPageNum = rootPageNum;
-		bufMgr->readPage(file, currentPageNum, currentPageData);
+	currentPageNum = rootPageNum;
+	bufMgr->readPage(file, currentPageNum, currentPageData);
 
-		if(attributeType == INTEGER){ //INT
-			lowValInt = *((int *)lowValParm);
-			highValInt = *((int *)highValParm); 
-			LeafNodeInt *currentNode = (LeafNodeInt *)currentPageData;
-			int i = 0;
-			while((currentNode->keyArray + i < lowValParm) || (currentNode->keyArray + i > highValParm)) {
+	if(attributeType == INTEGER){
+		NonLeafNodeInt *currentNode = (NonLeafNodeInt *)currentPageData;
+		lowValInt = *((int *)lowValParm);
+		highValInt = *((int *)highValParm); 
+
+		int i = 0;
+		// loops until it finds the node that is one level above a leaf.
+		while(currentNode->level != 1){
+			i = 0;
+			// finds beginning of range of nodes.
+			while(currentNode->keyArray[i] < lowValInt && currentNode->pageNoArray[i + 1] != Page::INVALID_NUMBER && i < nodeOccupancy){
 				i++;
 			}
-			if((lowOp == GT && currentNode->keyArray + i == lowValParm) || ( highOp == LT && currentNode->keyArray + i == highValParm)) {
-				throw NoSuchKeyFoundException();
-			}
-			nextEntry = i;
+			// found first page:
+			PageId nextNodePageNo = currentNode->pageNoArray[i];
+			// reads page and saves it in currentPageData
+			bufMgr->readPage(file, nextNodePageNo, currentPageData);
 			bufMgr->unPinPage(file, currentPageNum, false);
+			currentPageNum = nextNodePageNo;
+			// moves to next node
+			currentNode = (NonLeafNodeInt*) currentPageData;
 		}
-		else if(attributeType == DOUBLE){ //DOUBLE
-			lowValDouble = *((double *)lowValParm);
-			highValDouble = *((double *)highValParm); 
-			LeafNodeDouble *currentNode = (LeafNodeDouble *)currentPageData;
-			int i = 0;
-			while((currentNode->keyArray + i < lowValParm) || (currentNode->keyArray + i > highValParm)) {
-				i++;
-			}
-			if((lowOp == GT && currentNode->keyArray + i == lowValParm) 
-				|| ( highOp == LT && currentNode->keyArray + i == highValParm)) {
-				throw NoSuchKeyFoundException();
-			}
-			nextEntry = i;
-			bufMgr->unPinPage(file, currentPageNum, false);
+				
+		// at level 1
+		int j = 0;
+		while(currentNode->keyArray[j] > lowValInt && currentNode->pageNoArray[j + 1] != Page::INVALID_NUMBER && j < nodeOccupancy){
+			j++;
 		}
-		else if(attributeType == STRING){ //STRING
-			lowValString = std::string((char *)lowValParm).substr(0,STRINGSIZE);
-			highValString = std::string((char *)highValParm).substr(0,STRINGSIZE); 
-			LeafNodeString *currentNode = (LeafNodeString *)currentPageData;
-			int i = 0;
-			while((currentNode->keyArray + i < lowValParm) || (currentNode->keyArray + i > highValParm)){
-				i++;
-			}
-			if((lowOp == GT && currentNode->keyArray + i == lowValParm) 
-				|| ( highOp == LT && currentNode->keyArray + i == highValParm)) {
-				throw NoSuchKeyFoundException();
-			}
-			nextEntry = i;
-			bufMgr->unPinPage(file, currentPageNum, false);
-		}
+		// found first page:
+		PageId nextNodePageNo = currentNode->pageNoArray[j];
+		// reads page and saves it in currentPageData
+		bufMgr->readPage(file, nextNodePageNo, currentPageData);
+		bufMgr->unPinPage(file, currentPageNum, false);
+		currentPageNum = nextNodePageNo;
+		// moves to next node
+		nextEntry = 0; // at leaf!
 
 	}
+	else if(attributeType == DOUBLE){
 
-	//*******************************************************************************************************************
-	// non-leaf node
-	else{
-		currentPageNum = rootPageNum;
-		bool cont = true;
-		while(cont){
-			bufMgr->readPage(file, currentPageNum, currentPageData);
-			if(attributeType == INTEGER){ // int
-				NonLeafNodeInt *currentNode = (NonLeafNodeInt *)currentPageData;
-				int i = 0;
-				for(i = 0; currentNode->pageNoArray[i+1] != Page::INVALID_NUMBER && i < nodeOccupancy && compareIndexKey(currentNode->keyArray + i, lowValParm, false) > 0; i++);
+		NonLeafNodeDouble *currentNode = (NonLeafNodeDouble *)currentPageData;
+		lowValDouble = *((double *)lowValParm);
+		highValDouble = *((double *)highValParm); 
 
-				if(lowOp == GT && compareIndexKey(currentNode->keyArray + i, lowValParm, false) == 0){
-					i++;
-				}
-				PageId prevPageNum = currentPageNum;
-				currentPageNum = currentNode->pageNoArray[i];
-				bufMgr->unPinPage(file, prevPageNum, false);
-				if(currentNode->level == 1){ // if level of node in tree = 1
-					break; //  does the page need to be unpinned twice in this case? ****************************************
-				}
-				//scans leaf 
-				bufMgr->readPage(file, currentPageNum, currentPageData);
-				LeafNodeInt *currentNode1 = (LeafNodeInt *)currentPageData;
-				int j;
-				for(j = 0; compareIndexKey(currentNode1->keyArray + j, lowValParm, false) > 0 && j < leafOccupancy; j++);
-				if(lowOp == GT && compareIndexKey(currentNode1->keyArray + j, lowValParm, false) == 0){
-					throw NoSuchKeyFoundException();
-				}
-				nextEntry = j;
-				bufMgr->unPinPage(file, currentPageNum, false);
-
+		int i = 0;
+		// loops until it finds the node that is one level above a leaf.
+		while(currentNode->level != 1){
+			i = 0;
+			// finds beginning of range of nodes.
+			while(currentNode->keyArray[i] < lowValDouble && currentNode->pageNoArray[i + 1] != Page::INVALID_NUMBER && i < nodeOccupancy){
+				i++;
 			}
-			else if(attributeType == DOUBLE){ // double
-				NonLeafNodeDouble *currentNode = (NonLeafNodeDouble *)currentPageData;
-				int i = 0;
-				for(i = 0; currentNode->pageNoArray[i+1] != Page::INVALID_NUMBER && i < nodeOccupancy && compareIndexKey(currentNode->keyArray + i, lowValParm, false) > 0; i++);
-
-				if(lowOp == GT && compareIndexKey(currentNode->keyArray + i, lowValParm, false) == 0){
-					i++;
-				}
-				PageId prevPageNum = currentPageNum;
-				currentPageNum = currentNode->pageNoArray[i];
-				bufMgr->unPinPage(file, prevPageNum, false);
-				if(currentNode->level == 1){ // if level of node in tree = 1
-					break; //  does the page need to be unpinned twice in this case? ****************************************
-				}
-				// scans leaf 
-				bufMgr->readPage(file, currentPageNum, currentPageData);
-				LeafNodeDouble *currentNode1 = (LeafNodeDouble *)currentPageData;
-				int j;
-				for(j = 0; compareIndexKey(currentNode1->keyArray + j, lowValParm, false) > 0 && j < leafOccupancy; j++);
-				if(lowOp == GT && compareIndexKey(currentNode1->keyArray + j, lowValParm, false) == 0){
-					throw NoSuchKeyFoundException();
-				}
-				nextEntry = j;
-				bufMgr->unPinPage(file, currentPageNum, false);
-			}
-			else if(attributeType == STRING){ // string
-				NonLeafNodeString *currentNode = (NonLeafNodeString *)currentPageData;
-				int i = 0;
-				for(i = 0; currentNode->pageNoArray[i+1] != Page::INVALID_NUMBER && i < nodeOccupancy && compareIndexKey(currentNode->keyArray + i, lowValParm, false) > 0; i++);
-
-				if(lowOp == GT && compareIndexKey(currentNode->keyArray + i, lowValParm, false) == 0){
-					i++;
-				}
-				PageId prevPageNum = currentPageNum;
-				currentPageNum = currentNode->pageNoArray[i];
-				bufMgr->unPinPage(file, prevPageNum, false);
-				if(currentNode->level == 1){ // if level of node in tree = 1
-					break; //  does the page need to be unpinned twice in this case? ****************************************
-				}
-				// scans leaf 
-				bufMgr->readPage(file, currentPageNum, currentPageData);
-				LeafNodeString *currentNode1 = (LeafNodeString *)currentPageData;
-				int j;
-				for(j = 0; compareIndexKey(currentNode1->keyArray + j, lowValParm, false) > 0 && j < leafOccupancy; j++);
-				if(lowOp == GT && compareIndexKey(currentNode1->keyArray + j, lowValParm, false) == 0){
-					throw NoSuchKeyFoundException();
-				}
-				nextEntry = j;
-				bufMgr->unPinPage(file, currentPageNum, false);
-			}
+			// found first page:
+			PageId nextNodePageNo = currentNode->pageNoArray[i];
+			// reads page and saves it in currentPageData
+			bufMgr->readPage(file, nextNodePageNo, currentPageData);
+			bufMgr->unPinPage(file, currentPageNum, false);
+			currentPageNum = nextNodePageNo;
+			// moves to next node
+			currentNode = (NonLeafNodeDouble*) currentPageData;
 		}
+				
+		// at level 1
+		int j = 0;
+		while(currentNode->keyArray[j] > lowValDouble && currentNode->pageNoArray[j + 1] != Page::INVALID_NUMBER && j < nodeOccupancy){
+			j++;
+		}
+		// found first page:
+		PageId nextNodePageNo = currentNode->pageNoArray[j];
+		// reads page and saves it in currentPageData
+		bufMgr->readPage(file, nextNodePageNo, currentPageData);
+		bufMgr->unPinPage(file, currentPageNum, false);
+		currentPageNum = nextNodePageNo;
+		// moves to next node
+		nextEntry = 0; // at leaf!
+
+	}
+	else if(attributeType == STRING){
+		NonLeafNodeString *currentNode = (NonLeafNodeString *)currentPageData;
+		lowValString = std::string((char *)lowValParm).substr(0,STRINGSIZE);
+		highValString = std::string((char *)highValParm).substr(0,STRINGSIZE);
+
+		int i = 0;
+		// loops until it finds the node that is one level above a leaf.
+		while(currentNode->level != 1){
+			i = 0;
+			// finds beginning of range of nodes.
+			while(currentNode->keyArray[i] < lowValString && currentNode->pageNoArray[i + 1] != Page::INVALID_NUMBER && i < nodeOccupancy){
+				i++;
+			}
+			// found first page:
+			PageId nextNodePageNo = currentNode->pageNoArray[i];
+			// reads page and saves it in currentPageData
+			bufMgr->readPage(file, nextNodePageNo, currentPageData);
+			bufMgr->unPinPage(file, currentPageNum, false);
+			currentPageNum = nextNodePageNo;
+			// moves to next node
+			currentNode = (NonLeafNodeString*) currentPageData;
+		}
+				
+		// at level 1
+		int j = 0;
+		while(currentNode->keyArray[j] > lowValString && currentNode->pageNoArray[j + 1] != Page::INVALID_NUMBER && j < nodeOccupancy){
+			j++;
+		}
+		// found first page:
+		PageId nextNodePageNo = currentNode->pageNoArray[j];
+		// reads page and saves it in currentPageData
+		bufMgr->readPage(file, nextNodePageNo, currentPageData);
+		bufMgr->unPinPage(file, currentPageNum, false);
+		currentPageNum = nextNodePageNo;
+		// moves to next node
+		nextEntry = 0; // at leaf!
+
 	}
 }
-
-
-
 
 // -----------------------------------------------------------------------------
 // BTreeIndex::scanNext
