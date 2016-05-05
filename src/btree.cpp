@@ -93,9 +93,10 @@ BTreeIndex::BTreeIndex(const std::string & relationName,
 			try{ // if metadata does not match with existing file, unpin page
 				bufMgr->unPinPage(file, headerPageNum, false);
 			} catch (PageNotPinnedException e ) {
+				// do nothing
 			}
 
-			throw BadIndexInfoException("constructor parameters do not match exist index file");
+			throw BadIndexInfoException("metadata from constructor does not match existing file's metadata");
 		}
 
 		this->rootPageNum = indexMetaInfo->rootPageNo;
