@@ -174,10 +174,14 @@ const void BTreeIndex::startScan(const void* lowValParm,
 		const void* highValParm,
 		const Operator highOpParm)
 {
-	// not sure if lowOp and highOp will have values at this point....
-	if(lowOpParm != lowOp || highOpParm != highOp){
+
+	if((highOpParm != LTE && highOpParm != LT) || (lowOpParm != GTE && lowOpParm != GT)){
 		throw BadOpcodesException();
 	}
+
+	lowOp = lowOpParm;
+	highOp = highOpParm;
+
 	if(lowValParm < highValParm){
 		throw BadScanrangeException();
 	}
@@ -189,8 +193,6 @@ const void BTreeIndex::startScan(const void* lowValParm,
 
 	scanExecuting = true;
 
-	lowOp = lowOpParm;
-	highOp = highOpParm;
 	// if there are no nodes in the B+ tree
 	if(rootPageNum == Page::INVALID_NUMBER){
 		exit(1);
@@ -327,99 +329,97 @@ const void BTreeIndex::scanNext(RecordId& outRid)
 	bufMgr->readPage(file, currentPageNum, currentPageData);
 
 	if(attributeType == INTEGER){
-		LeafNodeInt *currentNode = (LeafNodeInt *)currentPageData;
-		if(currentPageNum == Page::INVALID_NUMBER || currentNode->keyArray[nextEntry] > highValInt ||
-			(highOp == LT && currentNode->keyArray[nextEntry] == highValInt)){
-			throw IndexScanCompletedException();
-		}
-		// advance outRid to contain value in the next position in ridArray:
-		outRid = currentNode->ridArray[nextEntry];
-		// check to see if this new page number is valid
-		if(outRid.page_number == Page::INVALID_NUMBER){
-			throw IndexScanCompletedException();
-		}
-		// if the new page is valid, Use the right sibling page number value from the current leaf to 
-		// move on to the next leaf which holds successive key values for the scan.
-		nextEntry++;
-		// check if new page number is valid:
-		if(currentNode->ridArray[nextEntry].page_number == Page::INVALID_NUMBER || nextEntry > leafOccupancy){
-			// Unpin the current page:
-			try{
-				while(currentPageNum != Page::INVALID_NUMBER){
-					bufMgr->unPinPage(file, currentPageNum, false);
+		bool cont = true;
+		while(cont){
+			LeafNodeInt *currentNode = (LeafNodeInt *)currentPageData;
+			if((nextEntry >= nodeOccupancy) || (currentNode->ridArray[nextEntry].page_number == 0)){
+				PageId nextPageNo = currentNode->rightSibPageNo;
+				bufMgr->unPinPage(file, currentPageNum, false);
+				if(nextPageNo == 0){ // scan is done:
+					throw IndexScanCompletedException();
 				}
-			} catch(BadgerDbException e){
-					// do nothing (?)
+				// scan is not done:
+				currentPageNum = nextPageNo;
+				bufMgr->readPage(file, currentPageNum, currentPageData);
+				nextEntry = 0;
 			}
-			currentPageNum = currentNode->rightSibPageNo;
-			nextEntry = 0;
-			return;
+			else if(((currentNode->keyArray[nextEntry] > lowValInt) && (lowOp == GT)) 
+				|| ((currentNode->keyArray[nextEntry] <= lowValInt) && (lowOp == GTE))){
+					nextEntry++;
+			}
+			else if(((currentNode->keyArray[nextEntry]) < highValInt && (highOp == LT)) 
+				|| ((currentNode->keyArray[nextEntry] <= highValInt) && (highOp == LTE))){
+				throw IndexScanCompletedException();
+			}
+			else{
+				outRid = currentNode->ridArray[nextEntry];
+				nextEntry;
+				cont = false;
+			}
 		}
 	}
 	else if(attributeType == DOUBLE){
-		LeafNodeDouble *currentNode = (LeafNodeDouble *)currentPageData;
-		if(currentPageNum == Page::INVALID_NUMBER || currentNode->keyArray[nextEntry] > highValDouble ||
-			(highOp == LT && currentNode->keyArray[nextEntry] == highValDouble)){
-			throw IndexScanCompletedException();
-		}
-		// advance outRid to contain value in the next position in ridArray:
-		outRid = currentNode->ridArray[nextEntry];
-		// check to see if this new page number is valid
-		if(outRid.page_number == Page::INVALID_NUMBER){
-			throw IndexScanCompletedException();
-		}
-		// if the new page is valid, Use the right sibling page number value from the current leaf to 
-		// move on to the next leaf which holds successive key values for the scan.
-		nextEntry++;
-		// check if new page number is valid:
-		if(currentNode->ridArray[nextEntry].page_number == Page::INVALID_NUMBER || nextEntry > leafOccupancy){
-			// Unpin the current page:
-			try{
-				while(currentPageNum != Page::INVALID_NUMBER){
-					bufMgr->unPinPage(file, currentPageNum, false);
+		bool cont = true;
+		while(cont){
+			LeafNodeDouble *currentNode = (LeafNodeDouble *)currentPageData;
+			if((nextEntry >= nodeOccupancy) || (currentNode->ridArray[nextEntry].page_number == 0)){
+				PageId nextPageNo = currentNode->rightSibPageNo;
+				bufMgr->unPinPage(file, currentPageNum, false);
+				if(nextPageNo == 0){ // scan is done:
+					throw IndexScanCompletedException();
 				}
-			} catch(BadgerDbException e){
-					// do nothing (?)
+				// scan is not done:
+				currentPageNum = nextPageNo;
+				bufMgr->readPage(file, currentPageNum, currentPageData);
+				nextEntry = 0;
 			}
-			currentPageNum = currentNode->rightSibPageNo;
-			nextEntry = 0;
-			return;
+			else if(((currentNode->keyArray[nextEntry] > lowValDouble) && (lowOp == GT)) 
+				|| ((currentNode->keyArray[nextEntry] <= lowValDouble) && (lowOp == GTE))){
+					nextEntry++;
+			}
+			else if(((currentNode->keyArray[nextEntry]) < highValDouble && (highOp == LT)) 
+				|| ((currentNode->keyArray[nextEntry] <= highValDouble) && (highOp == LTE))){
+				throw IndexScanCompletedException();
+			}
+			else{
+				outRid = currentNode->ridArray[nextEntry];
+				nextEntry;
+				cont = false;
+			}
 		}
-
 	}
 	else if(attributeType == STRING){
-		LeafNodeString *currentNode = (LeafNodeString *)currentPageData;
-		if(currentPageNum == Page::INVALID_NUMBER || currentNode->keyArray[nextEntry] > highValString ||
-			(highOp == LT && currentNode->keyArray[nextEntry] == highValString)){
-			throw IndexScanCompletedException();
-		}
-		// advance outRid to contain value in the next position in ridArray:
-		outRid = currentNode->ridArray[nextEntry];
-		// check to see if this new page number is valid
-		if(outRid.page_number == Page::INVALID_NUMBER){
-			throw IndexScanCompletedException();
-		}
-		// if the new page is valid, Use the right sibling page number value from the current leaf to 
-		// move on to the next leaf which holds successive key values for the scan.
-		nextEntry++;
-		// check if new page number is valid:
-		if(currentNode->ridArray[nextEntry].page_number == Page::INVALID_NUMBER || nextEntry > leafOccupancy){
-			// Unpin the current page:
-			try{
-				while(currentPageNum != Page::INVALID_NUMBER){
-					bufMgr->unPinPage(file, currentPageNum, false);
+		bool cont = true;
+		while(cont){
+			LeafNodeString *currentNode = (LeafNodeString *)currentPageData;
+			if((nextEntry >= nodeOccupancy) || (currentNode->ridArray[nextEntry].page_number == 0)){
+				PageId nextPageNo = currentNode->rightSibPageNo;
+				bufMgr->unPinPage(file, currentPageNum, false);
+				if(nextPageNo == 0){ // scan is done:
+					throw IndexScanCompletedException();
 				}
-			} catch(BadgerDbException e){
-				// do nothing (?)
+				// scan is not done:
+				currentPageNum = nextPageNo;
+				bufMgr->readPage(file, currentPageNum, currentPageData);
+				nextEntry = 0;
 			}
-			currentPageNum = currentNode->rightSibPageNo;
-			nextEntry = 0;
-			return;
+			else if(((currentNode->keyArray[nextEntry] > lowValString) && (lowOp == GT)) 
+				|| ((currentNode->keyArray[nextEntry] <= lowValString) && (lowOp == GTE))){
+					nextEntry++;
+			}
+			else if(((currentNode->keyArray[nextEntry]) < highValString && (highOp == LT)) 
+				|| ((currentNode->keyArray[nextEntry] <= highValString) && (highOp == LTE))){
+				throw IndexScanCompletedException();
+			}
+			else{
+				outRid = currentNode->ridArray[nextEntry];
+				nextEntry++;
+				cont = false;
+			}
 		}
-		
 	}
-
 }
+
 
 // -----------------------------------------------------------------------------
 // BTreeIndex::endScan
@@ -428,16 +428,12 @@ const void BTreeIndex::scanNext(RecordId& outRid)
 const void BTreeIndex::endScan()
 {
 	if(scanExecuting == false){
-		// Unpin the current page:
-		if(currentPageNum != Page::INVALID_NUMBER){
-			bufMgr->unPinPage(file, currentPageNum, false);
-		}	
 		throw ScanNotInitializedException();
 	}
 	scanExecuting = false;
-		if(currentPageNum != Page::INVALID_NUMBER){
-				bufMgr->unPinPage(file, currentPageNum, false);
-		}
+	if(currentPageNum != Page::INVALID_NUMBER){
+		bufMgr->unPinPage(file, currentPageNum, false);
+	}
 
 }
 
