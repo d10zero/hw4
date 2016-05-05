@@ -15,6 +15,7 @@
 #include "exceptions/index_scan_completed_exception.h"
 #include "exceptions/file_not_found_exception.h"
 #include "exceptions/end_of_file_exception.h"
+#include "exceptions/page_not_pinned_exception.h"
 //#include <iostream>
 //#include <memory>
 
@@ -46,6 +47,8 @@ BTreeIndex::BTreeIndex(const std::string & relationName,
 	bufMgr = bufMgrIn;
 	this->attrByteOffset = attrByteOffset;
 	attributeType = attrType;
+	scanExecuting = false;
+
 
 	//do the following depending on the attribute type of string, 
 	//int or double
@@ -74,14 +77,92 @@ BTreeIndex::BTreeIndex(const std::string & relationName,
 		std::cout << "none of the attribute types matched";
 		//throw exception
 	}
-	try {
-		file = new BlobFile(outIndexName, false);
-		//try to find the file?
+	try{
+		// if file already exists
+		this->file = new BlobFile(outIndexName, false);
+		Page* currPage;
+		IndexMetaInfo* indexMetaInfo = (IndexMetaInfo*) currPage;
 
-	}catch (FileNotFoundException fnfe){
-		//create the new file, which is declared in the header btree.h
-		std::cout << "file not found exception \n";
+		headerPageNum = 1;
+		bufMgr->readPage(file, headerPageNum, currPage);
+		
+		if(indexMetaInfo->attrByteOffset != attrByteOffset
+		   || indexMetaInfo->attrType != attrType
+		   || strcmp(indexMetaInfo->relationName, relationName.c_str()) != 0
+				){
+			try{ // if metadata does not match with existing file, unpin page
+				bufMgr->unPinPage(file, headerPageNum, false);
+			} catch (PageNotPinnedException e ) {
+			}
+
+			throw BadIndexInfoException("constructor parameters do not match exist index file");
+		}
+
+		this->rootPageNum = indexMetaInfo->rootPageNo;
+		try {
+			bufMgr->unPinPage(file, headerPageNum, false);
+		} catch (PageNotPinnedException e){
+
+			// do nothing
+		}
+	}
+	catch (FileNotFoundException e){ // if a new file must be created
 		file = new BlobFile(outIndexName, true);
+		Page* currPage;
+		bufMgr->allocPage(file, headerPageNum, currPage);
+		// set metadata:
+		IndexMetaInfo* indexMetaInfo = (IndexMetaInfo*) currPage;
+		indexMetaInfo->attrByteOffset = attrByteOffset;
+		indexMetaInfo->attrType = attrType;
+		strcpy(indexMetaInfo->relationName, relationName.c_str());
+		// unpinpage if it is already pinned
+		try{
+			bufMgr->unPinPage(file, headerPageNum, true);
+		} catch (PageNotPinnedException e) {
+			// do nothing
+		}
+		// call allocPage in order to set the rootPageNo for the metadata
+		bufMgr->allocPage(file, rootPageNum, currPage);
+		indexMetaInfo->rootPageNo = rootPageNum;
+
+
+		// set the pageNoArray = 0 (not invalid)
+		if(attributeType == INTEGER){
+			NonLeafNodeInt *nonLeafNodeInt = (NonLeafNodeInt *) currPage;
+			for(int i=0;i<nodeOccupancy;i++){
+				nonLeafNodeInt->pageNoArray[i] = 0;
+			} 
+			nonLeafNodeInt->level = 1;
+		} else if(attributeType == DOUBLE){
+			NonLeafNodeDouble *nonLeafNodeDouble = (NonLeafNodeDouble *) currPage;
+			for(int i=0;i<nodeOccupancy;i++){
+				nonLeafNodeDouble->pageNoArray[i] = 0;
+			} 
+			nonLeafNodeDouble->level = 1;
+		} else {
+			NonLeafNodeString *nonLeafNodeString = (NonLeafNodeString *) currPage;
+			for(int i=0;i<nodeOccupancy;i++){
+				nonLeafNodeString->pageNoArray[i] = 0;
+			} 
+			nonLeafNodeString->level = 1;
+		}
+		try{
+			bufMgr->unPinPage(file, rootPageNum, true);
+		} catch (PageNotPinnedException e ) {
+			// do nothing
+		}
+
+		// file scan taken from main.cpp:
+		FileScan fscan(relationName, bufMgr);
+		RecordId scanRid;
+		bool cont = true;
+		while(cont)
+		{
+			fscan.scanNext(scanRid);
+			std::string recordStr = fscan.getRecord();
+			const char *record = recordStr.c_str();
+			insertEntry((void *) (record + attrByteOffset), scanRid);
+		}
 	}
 }
 
@@ -287,7 +368,7 @@ const void BTreeIndex::startScan(const void* lowValParm,
 		while(currentNode->level != 1){
 			i = 0;
 			// finds beginning of range of nodes.
-			while(currentNode->keyArray[i] < lowValInt && currentNode->pageNoArray[i + 1] != Page::INVALID_NUMBER && i < nodeOccupancy){
+			while(currentNode->keyArray[i] < lowValInt && currentNode->pageNoArray[i + 1] != 0 && i < nodeOccupancy){
 				i++;
 			}
 			// found first page:
@@ -302,7 +383,7 @@ const void BTreeIndex::startScan(const void* lowValParm,
 				
 		// at level 1
 		int j = 0;
-		while(currentNode->keyArray[j] > lowValInt && currentNode->pageNoArray[j + 1] != Page::INVALID_NUMBER && j < nodeOccupancy){
+		while(currentNode->keyArray[j] > lowValInt && currentNode->pageNoArray[j + 1] != 0 && j < nodeOccupancy){
 			j++;
 		}
 		// found first page:
@@ -326,7 +407,7 @@ const void BTreeIndex::startScan(const void* lowValParm,
 		while(currentNode->level != 1){
 			i = 0;
 			// finds beginning of range of nodes.
-			while(currentNode->keyArray[i] < lowValDouble && currentNode->pageNoArray[i + 1] != Page::INVALID_NUMBER && i < nodeOccupancy){
+			while(currentNode->keyArray[i] < lowValDouble && currentNode->pageNoArray[i + 1] != 0 && i < nodeOccupancy){
 				i++;
 			}
 			// found first page:
@@ -341,7 +422,7 @@ const void BTreeIndex::startScan(const void* lowValParm,
 				
 		// at level 1
 		int j = 0;
-		while(currentNode->keyArray[j] > lowValDouble && currentNode->pageNoArray[j + 1] != Page::INVALID_NUMBER && j < nodeOccupancy){
+		while(currentNode->keyArray[j] > lowValDouble && currentNode->pageNoArray[j + 1] != 0 && j < nodeOccupancy){
 			j++;
 		}
 		// found first page:
@@ -364,7 +445,7 @@ const void BTreeIndex::startScan(const void* lowValParm,
 		while(currentNode->level != 1){
 			i = 0;
 			// finds beginning of range of nodes.
-			while(currentNode->keyArray[i] < lowValString && currentNode->pageNoArray[i + 1] != Page::INVALID_NUMBER && i < nodeOccupancy){
+			while(currentNode->keyArray[i] < lowValString && currentNode->pageNoArray[i + 1] != 0 && i < nodeOccupancy){
 				i++;
 			}
 			// found first page:
@@ -379,7 +460,7 @@ const void BTreeIndex::startScan(const void* lowValParm,
 				
 		// at level 1
 		int j = 0;
-		while(currentNode->keyArray[j] > lowValString && currentNode->pageNoArray[j + 1] != Page::INVALID_NUMBER && j < nodeOccupancy){
+		while(currentNode->keyArray[j] > lowValString && currentNode->pageNoArray[j + 1] != 0 && j < nodeOccupancy){
 			j++;
 		}
 		// found first page:
@@ -508,7 +589,7 @@ const void BTreeIndex::endScan()
 		throw ScanNotInitializedException();
 	}
 	scanExecuting = false;
-	if(currentPageNum != Page::INVALID_NUMBER){
+	if(currentPageNum != 0){
 		bufMgr->unPinPage(file, currentPageNum, false);
 	}
 
