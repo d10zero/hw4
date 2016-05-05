@@ -212,7 +212,18 @@ const void BTreeIndex::insertEntry(const void *key, const RecordId rid)
 		RIDKeyPair<int> entry;
 		entry.set(rid, *((int* )key));
 		PageId updatedId = 0;
-		insertInteger(entry, false, rootPageNum, updatedId);
+		int newNodeVal = 0;
+		insertInteger(entry, false, rootPageNum, updatedId, newNodeVal);
+		// root split in recursive call:
+		if(updatedId == 0){
+			Page* root;
+			bufMgr->allocPage(file, updatedId, root);
+			NonLeafNodeInt* rootNode = (NonLeafNodeInt*) root;
+			for(int i = 0; i < nodeOccupancy + 1; i++){
+				rootNode->pageNoArray[i] = 0;
+			}
+			rootNode->keyArray[0] = newNodeVal;
+		}
 	} 
 	else if (attributeType == DOUBLE)
 	{
@@ -233,20 +244,18 @@ const void BTreeIndex::insertEntry(const void *key, const RecordId rid)
 //BTreeIndex::insertInteger
 //
 // ---------------------------------------------------------------------------
-const void BTreeIndex::insertInteger(RIDKeyPair<int> entry, bool leaf, PageId pageNo, PageId updatedId) 
+const void BTreeIndex::insertInteger(RIDKeyPair<int> entry, bool leaf, PageId pageNo, PageId updatedId, int newValInt) 
 {
 
 // TODO: (may need a different method for this or what is below) NEW ROOT NODE
 
 	// for a non-leaf node
 	if(!leaf){
-		NonLeafNodeInt newNodeVal;
-		insertNonLeafInteger(entry, newNodeVal, leaf, pageNo, updatedId);
+		insertNonLeafInteger(entry, newValInt, leaf, pageNo, updatedId);
 	}
 	// for a leaf node:
 	else {
-		LeafNodeInt newNodeVal;
-		insertLeafInteger(entry, newNodeVal, leaf, pageNo, updatedId);
+		insertLeafInteger(entry, newValInt, leaf, pageNo, updatedId);
 
 	}
 
@@ -258,7 +267,7 @@ const void BTreeIndex::insertInteger(RIDKeyPair<int> entry, bool leaf, PageId pa
 //BTreeIndex::insertInteger
 //
 // ---------------------------------------------------------------------------
-const void BTreeIndex::insertNonLeafInteger(RIDKeyPair<int> entry, NonLeafNodeInt newNodeVal, bool leaf, PageId pageNo, PageId updatedId) 
+const void BTreeIndex::insertNonLeafInteger(RIDKeyPair<int> entry, int newNodeVal, bool leaf, PageId pageNo, PageId updatedId) 
 {	
 	Page* newerPage;
 	bufMgr->readPage(file, pageNo, newerPage);
@@ -295,7 +304,7 @@ const void BTreeIndex::insertNonLeafInteger(RIDKeyPair<int> entry, NonLeafNodeIn
 	}
 	PageId newNodeId = 0;
 	// recursive call:
-	insertInteger(entry, isLeaf, currentNode->pageNoArray[i], newNodeId);
+	insertInteger(entry, isLeaf, currentNode->pageNoArray[i], newNodeId, newNodeVal);
 
 	
 
@@ -346,7 +355,7 @@ const void BTreeIndex::insertNonLeafInteger(RIDKeyPair<int> entry, NonLeafNodeIn
 //BTreeIndex::insertInteger
 //
 // ---------------------------------------------------------------------------
-const void BTreeIndex::insertLeafInteger(RIDKeyPair<int> entry, LeafNodeInt newNodeVal, bool leaf, PageId pageNo, PageId updatedId)
+const void BTreeIndex::insertLeafInteger(RIDKeyPair<int> entry, int newNodeVal, bool leaf, PageId pageNo, PageId updatedId)
 {	
 	Page* currPage;
 	bufMgr->readPage(file, pageNo, currPage);
@@ -462,6 +471,7 @@ const void BTreeIndex::insertDouble(RIDKeyPair<double> entry, bool leaf, PageId 
 	bufMgr->unPinPage(file, pageNo, true);
 
 }
+
 
 // ----------------------------------------------------------------------------
 //BTreeIndex::insertString
