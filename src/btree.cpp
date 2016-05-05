@@ -116,15 +116,21 @@ const void BTreeIndex::insertEntry(const void *key, const RecordId rid)
 
 	if( attributeType == INTEGER)
 	{
-		insertInteger(&key, rid);
+		RIDKeyPair<int> entry;
+		entry.set(rid, *((int* )key));
+		insertInteger(entry, false, rootPageNum);
 	} 
 	else if (attributeType == DOUBLE)
 	{
-		insertDouble(&key, rid);
+		RIDKeyPair<double> entry;
+		entry.set(rid, *((double* )key));
+		insertDouble(entry, false, rootPageNum);
 	}
 	else if (attributeType == STRING)
 	{
-		insertString(&key, rid);
+		RIDKeyPair<char[STRINGSIZE]> entry;
+		//entry.set(rid, *((char* )key));
+		insertString(entry, false, rootPageNum);
 	}
 }
 
@@ -133,10 +139,81 @@ const void BTreeIndex::insertEntry(const void *key, const RecordId rid)
 //BTreeIndex::insertInteger
 //
 // ---------------------------------------------------------------------------
-const void BTreeIndex::insertInteger(const void *key, const RecordId rid) 
+const void BTreeIndex::insertInteger(RIDKeyPair<int> entry, bool leaf, PageId pageNo) 
 {
-	RIDKeyPair<int> entry;
-	entry.set(rid, *((int* )key));
+
+// for a leaf node:
+	PageId* currPageNum;
+	if(leaf){
+		Page* currPage;
+		bufMgr->readPage(file, pageNo, currPage);
+		LeafNodeInt* currNode = (LeafNodeInt*) currPage;
+		// find the position 
+		int i = 0;
+		while(currNode->keyArray[i] < entry.key && i < leafOccupancy && currNode->ridArray[i].page_number != 0){
+			i++;
+		}
+		// find last entry in the array
+		int jLast = 0;
+		while(jLast < leafOccupancy && currNode->ridArray[i].page_number != 0){
+			jLast++;
+		}
+		// if the array is not full, move over recordIds in array to place new record in the correct position
+		if(jLast < leafOccupancy){
+			for(int a = jLast; a > i; a--){
+				currNode->ridArray[a] = currNode->ridArray[a - 1];
+				currNode->keyArray[a] = currNode->keyArray[a - 1];
+			}
+		}
+		else{ //if full:
+		// must split ***************
+		}
+		leafOccupancy++;
+		bufMgr->unPinPage(file, pageNo, true);
+	}
+	// for a non-leaf node
+	else{
+		Page* newerPage;
+		bufMgr->readPage(file, pageNo, newerPage);
+		NonLeafNodeInt* currNode = (NonLeafNodeInt*) newerPage;
+		// find position
+		int i = 0;
+		while(currNode->keyArray[i] < entry.key && i < nodeOccupancy && currNode->pageNoArray[i + 1] != 0){
+			i++;
+		}
+		if(currNode->pageNoArray[i] == 0){ // create leaf since there are no more positions
+			Page* newPage;
+			PageId newPageId;
+			bufMgr->allocPage(file, newPageId, newPage);
+			LeafNodeInt* newNode = (LeafNodeInt*) newPage;
+			for(int j = 0; j < nodeOccupancy; j++){
+				newNode->ridArray[j].page_number = 0;
+			}
+			newNode->ridArray[0] = entry.rid;
+			newNode->rightSibPageNo = 0;
+			currNode->pageNoArray[0] = newPageId;
+			bufMgr->unPinPage(file, newPageId, true);
+			bufMgr->unPinPage(file, pageNo, true);
+			return; // done with inserting
+		}
+
+		bufMgr->unPinPage(file, pageNo, false);
+		bool isLeaf = true;
+		if(currNode->level == 1){
+			isLeaf = true;
+		}
+		else{
+			isLeaf = false;
+		}
+		insertInteger(entry, isLeaf, currNode->pageNoArray[i]);
+
+		// check if node was split. if so, must insert.
+
+
+	}
+	nodeOccupancy++;
+	bufMgr->unPinPage(file, pageNo, true);
+
 }
 
 
@@ -144,10 +221,8 @@ const void BTreeIndex::insertInteger(const void *key, const RecordId rid)
 //BTreeIndex::insertDouble
 //
 // ---------------------------------------------------------------------------
-const void BTreeIndex::insertDouble(const void *key, const RecordId rid) 
+const void BTreeIndex::insertDouble(RIDKeyPair<double> entry, bool leaf, PageId pageNo) 
 {
-	RIDKeyPair<int> entry;
-	entry.set(rid, *((double* )key));
 
 
 }
@@ -156,10 +231,9 @@ const void BTreeIndex::insertDouble(const void *key, const RecordId rid)
 //BTreeIndex::insertString
 //
 // ---------------------------------------------------------------------------
-const void BTreeIndex::insertString(const void *key, const RecordId rid) 
+const void BTreeIndex::insertString(RIDKeyPair<char[STRINGSIZE]> entry, bool leaf, PageId pageNo) 
 {
-	RIDKeyPair<int> entry;
-	entry.set(rid, *((char* )key));
+
 
 }
 
