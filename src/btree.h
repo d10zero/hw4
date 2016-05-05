@@ -479,9 +479,11 @@ class BTreeIndex {
   **/
   const void endScan();
 
-  const void insertInteger(RIDKeyPair<int> entry, bool leaf, PageId pageNo);
+  const void insertInteger(RIDKeyPair<int> entry, bool leaf, PageId pageNo, PageId updatedId);
   const void insertDouble(RIDKeyPair<double> entry, bool leaf, PageId pageNo);
   const void insertString(RIDKeyPair<char[STRINGSIZE]> entry, bool leaf, PageId pageNo); 
+  const void insertNonLeafInteger(RIDKeyPair<int> entry, NonLeafNodeInt currNode, bool leaf, PageId pageNo, PageId updatedId);
+  const void insertLeafInteger(RIDKeyPair<int> entry, LeafNodeInt currNode, bool leaf, PageId pageNo, PageId updatedId); 
 };
 
 }
