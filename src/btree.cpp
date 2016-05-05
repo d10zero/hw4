@@ -57,17 +57,17 @@ BTreeIndex::BTreeIndex(const std::string & relationName,
 	//idxStr << relationName << ’.’ << attrByteOffset;
 	//std::string indexName = idxStr.str() ; // indexName is the name of the index file
 
-	if (attributeType == 0){
+	if (attributeType == INTEGER){
 		//0 = interger attribute type
 		nodeOccupancy = INTARRAYNONLEAFSIZE;
 		leafOccupancy = INTARRAYLEAFSIZE;
 	} 
-	else if (attributeType == 1){
+	else if (attributeType == DOUBLE){
 		//1 = double attribute type
 		nodeOccupancy = DOUBLEARRAYNONLEAFSIZE;
 		leafOccupancy = DOUBLEARRAYLEAFSIZE;
 	} 
-	else if (attributeType == 2){
+	else if (attributeType == STRING){
 		//2 = string attribute type
 		nodeOccupancy = STRINGARRAYNONLEAFSIZE;
 		leafOccupancy = STRINGARRAYLEAFSIZE;	
@@ -77,17 +77,20 @@ BTreeIndex::BTreeIndex(const std::string & relationName,
 		std::cout << "none of the attribute types matched";
 		//throw exception
 	}
+		
+
+
 	try{
 		// if file already exists
 		this->file = new BlobFile(outIndexName, false);
 		Page* currPage;
-		IndexMetaInfo* metaData = (IndexMetaInfo*) currPage;
-
 		headerPageNum = 1;
 		bufMgr->readPage(file, headerPageNum, currPage);
+		IndexMetaInfo* metaData = (IndexMetaInfo*) currPage;
+
 		
 		if(metaData->attrByteOffset != attrByteOffset
-		   || metaData->attrType != attrType
+		   || metaData->attrType != attributeType
 		   || strcmp(metaData->relationName, relationName.c_str()) != 0
 				){
 			try{ // if metadata does not match with existing file, unpin page
@@ -99,7 +102,7 @@ BTreeIndex::BTreeIndex(const std::string & relationName,
 			throw BadIndexInfoException("metadata from constructor does not match existing file's metadata");
 		}
 
-		this->rootPageNum = metaData->rootPageNo;
+		rootPageNum = metaData->rootPageNo;
 		try {
 			bufMgr->unPinPage(file, headerPageNum, false);
 		} catch (PageNotPinnedException e){
@@ -114,46 +117,51 @@ BTreeIndex::BTreeIndex(const std::string & relationName,
 		// set metadata:
 		IndexMetaInfo* metaData = (IndexMetaInfo*) currPage;
 		metaData->attrByteOffset = attrByteOffset;
-		metaData->attrType = attrType;
+		metaData->attrType = attributeType;
 		strcpy(metaData->relationName, relationName.c_str());
 		// unpinpage if it is already pinned
-		try{
-			bufMgr->unPinPage(file, headerPageNum, true);
-		} catch (PageNotPinnedException e) {
-			// do nothing
-		}
+
 		// call allocPage in order to set the rootPageNo for the metadata
 		bufMgr->allocPage(file, rootPageNum, currPage);
 		metaData->rootPageNo = rootPageNum;
 
 
-		// set the pageNoArray = 0 (not invalid)
-		if(attributeType == INTEGER){
-			NonLeafNodeInt *nonLeafNodeInt = (NonLeafNodeInt *) currPage;
-			for(int i=0;i<nodeOccupancy;i++){
-				nonLeafNodeInt->pageNoArray[i] = 0;
-			} 
-			nonLeafNodeInt->level = 1;
-		} else if(attributeType == DOUBLE){
-			NonLeafNodeDouble *nonLeafNodeDouble = (NonLeafNodeDouble *) currPage;
-			for(int i=0;i<nodeOccupancy;i++){
-				nonLeafNodeDouble->pageNoArray[i] = 0;
-			} 
-			nonLeafNodeDouble->level = 1;
-		} else {
-			NonLeafNodeString *nonLeafNodeString = (NonLeafNodeString *) currPage;
-			for(int i=0;i<nodeOccupancy;i++){
-				nonLeafNodeString->pageNoArray[i] = 0;
-			} 
-			nonLeafNodeString->level = 1;
+		try{
+			bufMgr->unPinPage(file, headerPageNum, true);
+		} catch (PageNotPinnedException e) {
+			// do nothing
 		}
+
 		try{
 			bufMgr->unPinPage(file, rootPageNum, true);
 		} catch (PageNotPinnedException e ) {
 			// do nothing
 		}
 
-		// file scan taken from main.cpp:
+				// set the pageNoArray = 0 (not invalid)
+		if(attributeType == INTEGER){
+			NonLeafNodeInt *nonLeafNodeInt = (NonLeafNodeInt *) currPage;
+			for(int i = 0; i < nodeOccupancy; i++){
+				nonLeafNodeInt->pageNoArray[i] = 0;
+			} 
+			nonLeafNodeInt->level = 1;
+		} else if(attributeType == DOUBLE){
+			NonLeafNodeDouble *nonLeafNodeDouble = (NonLeafNodeDouble *) currPage;
+			for(int i = 0; i < nodeOccupancy; i++){
+				nonLeafNodeDouble->pageNoArray[i] = 0;
+			} 
+			nonLeafNodeDouble->level = 1;
+		} else if (attributeType == STRING) {
+			NonLeafNodeString *nonLeafNodeString = (NonLeafNodeString *) currPage;
+			for(int i = 0; i < nodeOccupancy; i++){
+				nonLeafNodeString->pageNoArray[i] = 0;
+			} 
+			nonLeafNodeString->level = 1;
+		}
+	}
+	FileScan fscan(relationName, bufMgr);
+	try{
+	// file scan taken from main.cpp:
 		FileScan fscan(relationName, bufMgr);
 		RecordId scanRid;
 		bool cont = true;
@@ -164,7 +172,10 @@ BTreeIndex::BTreeIndex(const std::string & relationName,
 			const char *record = recordStr.c_str();
 			insertEntry((void *) (record + attrByteOffset), scanRid);
 		}
+	}catch(EndOfFileException e){
+		// end of scan
 	}
+	//delete fscan;
 }
 
 
