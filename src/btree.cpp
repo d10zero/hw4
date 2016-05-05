@@ -142,6 +142,8 @@ const void BTreeIndex::insertEntry(const void *key, const RecordId rid)
 const void BTreeIndex::insertInteger(RIDKeyPair<int> entry, bool leaf, PageId pageNo) 
 {
 
+// TODO: (may need a different method for this or what is below) NEW ROOT NODE
+
 // for a leaf node:
 	PageId* currPageNum;
 	if(leaf){
@@ -166,7 +168,7 @@ const void BTreeIndex::insertInteger(RIDKeyPair<int> entry, bool leaf, PageId pa
 			}
 		}
 		else{ //if full:
-		// must split ***************
+		// TODO: must split ***************
 		}
 		leafOccupancy++;
 		bufMgr->unPinPage(file, pageNo, true);
@@ -207,7 +209,8 @@ const void BTreeIndex::insertInteger(RIDKeyPair<int> entry, bool leaf, PageId pa
 		}
 		insertInteger(entry, isLeaf, currNode->pageNoArray[i]);
 
-		// check if node was split. if so, must insert.
+		// TODO: check if node was split. if so, must insert *****************	
+		// 
 
 
 	}
