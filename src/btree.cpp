@@ -81,14 +81,14 @@ BTreeIndex::BTreeIndex(const std::string & relationName,
 		// if file already exists
 		this->file = new BlobFile(outIndexName, false);
 		Page* currPage;
-		IndexMetaInfo* indexMetaInfo = (IndexMetaInfo*) currPage;
+		IndexMetaInfo* metaData = (IndexMetaInfo*) currPage;
 
 		headerPageNum = 1;
 		bufMgr->readPage(file, headerPageNum, currPage);
 		
-		if(indexMetaInfo->attrByteOffset != attrByteOffset
-		   || indexMetaInfo->attrType != attrType
-		   || strcmp(indexMetaInfo->relationName, relationName.c_str()) != 0
+		if(metaData->attrByteOffset != attrByteOffset
+		   || metaData->attrType != attrType
+		   || strcmp(metaData->relationName, relationName.c_str()) != 0
 				){
 			try{ // if metadata does not match with existing file, unpin page
 				bufMgr->unPinPage(file, headerPageNum, false);
@@ -99,7 +99,7 @@ BTreeIndex::BTreeIndex(const std::string & relationName,
 			throw BadIndexInfoException("metadata from constructor does not match existing file's metadata");
 		}
 
-		this->rootPageNum = indexMetaInfo->rootPageNo;
+		this->rootPageNum = metaData->rootPageNo;
 		try {
 			bufMgr->unPinPage(file, headerPageNum, false);
 		} catch (PageNotPinnedException e){
@@ -112,10 +112,10 @@ BTreeIndex::BTreeIndex(const std::string & relationName,
 		Page* currPage;
 		bufMgr->allocPage(file, headerPageNum, currPage);
 		// set metadata:
-		IndexMetaInfo* indexMetaInfo = (IndexMetaInfo*) currPage;
-		indexMetaInfo->attrByteOffset = attrByteOffset;
-		indexMetaInfo->attrType = attrType;
-		strcpy(indexMetaInfo->relationName, relationName.c_str());
+		IndexMetaInfo* metaData = (IndexMetaInfo*) currPage;
+		metaData->attrByteOffset = attrByteOffset;
+		metaData->attrType = attrType;
+		strcpy(metaData->relationName, relationName.c_str());
 		// unpinpage if it is already pinned
 		try{
 			bufMgr->unPinPage(file, headerPageNum, true);
@@ -124,7 +124,7 @@ BTreeIndex::BTreeIndex(const std::string & relationName,
 		}
 		// call allocPage in order to set the rootPageNo for the metadata
 		bufMgr->allocPage(file, rootPageNum, currPage);
-		indexMetaInfo->rootPageNo = rootPageNum;
+		metaData->rootPageNo = rootPageNum;
 
 
 		// set the pageNoArray = 0 (not invalid)
