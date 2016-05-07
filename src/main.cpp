@@ -164,6 +164,7 @@ int main(int argc, char **argv)
 	File::remove(relationName);
 
 	test1();
+	std::cout << "post test 1 \n";
 	test2();
 	test3();
 	//errorTests();
@@ -222,10 +223,14 @@ void createRelationForward()
 
   file1 = new PageFile(relationName, true);
 
+
+
   // initialize all of record1.s to keep purify happy
   memset(record1.s, ' ', sizeof(record1.s));
 	PageId new_page_number;
   Page new_page = file1->allocatePage(new_page_number);
+
+
 
   // Insert a bunch of tuples into the relation.
   for(int i = 0; i < relationSize; i++ )
@@ -234,7 +239,6 @@ void createRelationForward()
     record1.i = i;
     record1.d = (double)i;
     std::string new_data(reinterpret_cast<char*>(&record1), sizeof(record1));
-
 		while(1)
 		{
 			try
@@ -249,7 +253,6 @@ void createRelationForward()
 			}
 		}
   }
-
 	file1->writePage(new_page_number, new_page);
 }
 
@@ -383,6 +386,7 @@ void indexTests()
   	{
   	}
   }
+  /*
   else if(testNum == 2)
   {
     doubleTests();
@@ -405,6 +409,7 @@ void indexTests()
   	{
   	}
   }
+  */
 }
 
 // -----------------------------------------------------------------------------
@@ -415,15 +420,17 @@ void intTests()
 {
   std::cout << "Create a B+ Tree index on the integer field" << std::endl;
   BTreeIndex index(relationName, intIndexName, bufMgr, offsetof(tuple,i), INTEGER);
-
+  std::cout << "\npost beginning test\n";
 	// run some tests
 	checkPassFail(intScan(&index,25,GT,40,LT), 14)
+	std::cout << "\npost first test\n";
 	checkPassFail(intScan(&index,20,GTE,35,LTE), 16)
 	checkPassFail(intScan(&index,-3,GT,3,LT), 3)
 	checkPassFail(intScan(&index,996,GT,1001,LT), 4)
 	checkPassFail(intScan(&index,0,GT,1,LT), 0)
 	checkPassFail(intScan(&index,300,GT,400,LT), 99)
 	checkPassFail(intScan(&index,3000,GTE,4000,LT), 1000)
+	std::cout << "\npost last test\n";
 }
 
 int intScan(BTreeIndex * index, int lowVal, Operator lowOp, int highVal, Operator highOp)
